@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1E2A2F">
+<title>Derelict – abandoned place finder</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="vendor/leaflet.css">
+<style>
+:root {
+  --ink: #1E2A2F;
+  --concrete: #E6E8E3;
+  --hazard: #F2B705;
+  --moss: #4F7A3F;
+  --brick: #A8402F;
+  --steel: #5E6C72;
+  --line: #BFC5C0;
+  --head: "Roboto Condensed", "Arial Narrow", "Helvetica Neue", Roboto, sans-serif;
+  --body: system-ui, -apple-system, Roboto, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; background: var(--ink); color: var(--ink); font-family: var(--body); -webkit-tap-highlight-color: transparent; }
+#map { position: fixed; inset: 0; background: #cfd4d0; }
+
+/* HUD */
+#hud {
+  position: fixed; z-index: 1000; left: 10px; top: calc(10px + env(safe-area-inset-top, 0px));
+  width: calc(100% - 76px); max-width: 420px;
+  background: var(--ink); color: var(--concrete); padding: 8px 10px 9px; border: 2px solid var(--ink);
+  box-shadow: 0 2px 0 rgba(0,0,0,.25);
+}
+#hud .row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+#lvlNum { font: 700 22px/1 var(--head); color: var(--hazard); margin-right: 6px; }
+#lvlTitle { font: 600 16px/1 var(--head); }
+#stats, #xpText { font-size: 12px; color: #B9C3C6; }
+#bar { height: 10px; background: #3A494F; margin: 7px 0 4px; overflow: hidden; }
+#barFill { display: block; height: 100%; width: 0; background: repeating-linear-gradient(-45deg, var(--hazard) 0 8px, #1E2A2F 8px 12px); transition: width .4s ease; }
+
+/* Sheet */
+#sheet {
+  position: fixed; z-index: 1000; left: 0; right: 0; bottom: 0; max-height: 56vh; overflow-y: auto;
+  background: var(--concrete); border-top: 4px solid var(--hazard);
+  padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+}
+#sheet h2 { font: 700 22px/1.15 var(--head); margin: 0 0 2px; overflow-wrap: anywhere; }
+#sheet p { margin: 0 0 8px; line-height: 1.4; max-width: 60ch; }
+.muted { color: var(--steel); font-size: 14px; }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+button, .linkbtn {
+  font: 700 16px/1 var(--head); min-height: 48px; padding: 0 16px; border: 2px solid var(--ink);
+  background: var(--concrete); color: var(--ink); cursor: pointer; text-decoration: none;
+  display: inline-flex; align-items: center; justify-content: center; flex: 1 1 140px;
+}
+button.primary { background: var(--hazard); }
+button.yes { background: var(--moss); color: #fff; }
+button.no { background: var(--brick); color: #fff; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:active:not(:disabled) { transform: translateY(1px); }
+:focus-visible { outline: 3px solid #1B6FD1; outline-offset: 2px; }
+.seg { display: flex; margin: 8px 0; }
+.seg button { flex: 1; min-height: 40px; font-size: 15px; border-right-width: 0; }
+.seg button:last-child { border-right-width: 2px; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--hazard); }
+.checkin { border-top: 2px solid var(--ink); margin-top: 12px; padding-top: 10px; }
+.checkin .btns { margin-top: 4px; }
+details { margin: 8px 0; }
+summary { font: 700 16px/1.2 var(--head); cursor: pointer; min-height: 32px; display: flex; align-items: center; }
+ol.steps { margin: 6px 0 0; padding-left: 22px; font-size: 14px; line-height: 1.45; }
+ol.steps small { color: var(--steel); }
+.settings label { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 15px; }
+.settings select { font: 16px var(--body); padding: 8px; border: 2px solid var(--ink); background: #fff; }
+.settings input[type=checkbox] { width: 22px; height: 22px; }
+.fine { font-size: 12px; color: var(--steel); margin-top: 8px; }
+.fine a { color: var(--steel); }
+
+/* Toast + overlay */
+#toast { position: fixed; z-index: 2000; left: 50%; top: calc(86px + env(safe-area-inset-top, 0px)); transform: translateX(-50%);
+  background: var(--hazard); color: var(--ink); font: 700 16px/1.3 var(--head); padding: 10px 14px; border: 2px solid var(--ink); max-width: 90vw; text-align: center; }
+#intro { position: fixed; inset: 0; z-index: 3000; background: rgba(30,42,47,.94); display: flex; align-items: center; justify-content: center; padding: 20px; }
+#intro .card { background: var(--concrete); border-top: 6px solid var(--hazard); padding: 20px; max-width: 440px; }
+#intro h1 { font: 700 28px/1.1 var(--head); margin: 0 0 10px; }
+#intro p { margin: 0 0 10px; line-height: 1.45; }
+
+.leaflet-container { font-family: var(--body); }
+.leaflet-control-zoom a { width: 44px !important; height: 44px !important; line-height: 44px !important; font-size: 22px !important; }
+.leaflet-top.leaflet-right { top: env(safe-area-inset-top, 0px); }
+@media (prefers-reduced-motion: reduce) { #barFill { transition: none; } }
+</style>
+</head>
+<body>
+<div id="map" aria-label="Map of abandoned places"></div>
+
+<header id="hud">
+  <div class="row">
+    <div><span id="lvlNum">Lv 1</span><span id="lvlTitle">Scout</span></div>
+    <span id="stats">0 confirmed</span>
+  </div>
+  <div id="bar" role="progressbar" aria-label="XP to next level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="barFill"></i></div>
+  <div id="xpText">0 / 100 XP</div>
+</header>
+
+<main id="sheet" aria-live="polite">
+  <section id="home">
+    <p id="status">Tap Random spot to get a place to check out, or tap any yellow dot on the map.</p>
+    <div class="btns">
+      <button id="btnRandom" class="primary">Random spot</button>
+      <button id="btnSearch">Search this area</button>
+    </div>
+    <details class="settings">
+      <summary>Settings</summary>
+      <label>Search radius
+        <select id="selRadius">
+          <option value="5000">5 km</option>
+          <option value="10000">10 km</option>
+          <option value="25000">25 km</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="chkTest"> Test mode (skip the 200 m check-in distance)</label>
+      <div class="btns"><button id="btnRestore">Restore removed places</button></div>
+    </details>
+    <p class="fine">Places come from OpenStreetMap, so some are out of date. That is why you confirm them. Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>.</p>
+  </section>
+
+  <section id="target" hidden>
+    <h2 id="tTitle"></h2>
+    <p id="tKind" class="muted"></p>
+    <p id="tDist"></p>
+    <p id="tAddr"></p>
+
+    <div class="seg" role="group" aria-label="Travel mode">
+      <button data-mode="car" aria-pressed="true">Drive</button>
+      <button data-mode="foot" aria-pressed="false">Walk</button>
+      <button data-mode="bike" aria-pressed="false">Bike</button>
+    </div>
+    <p id="routeInfo" class="muted">Loading route…</p>
+    <details id="stepsBox" hidden>
+      <summary>Directions</summary>
+      <ol id="steps" class="steps"></ol>
+    </details>
+
+    <div class="btns">
+      <button id="btnNav" class="primary">Open in maps app</button>
+      <button id="btnCopy">Copy address</button>
+    </div>
+
+    <div class="checkin">
+      <p id="checkHint" class="muted"></p>
+      <div class="btns">
+        <button id="btnYes" class="yes">Confirm abandoned</button>
+        <button id="btnNo" class="no">Not abandoned</button>
+      </div>
+    </div>
+
+    <div class="btns">
+      <button id="btnSkip">Another random spot</button>
+      <button id="btnBack">Back to map</button>
+    </div>
+    <p class="fine"><a id="lnkOsm" target="_blank" rel="noopener">View on OpenStreetMap</a> · <a id="lnkGmaps" target="_blank" rel="noopener">Open in Google Maps</a></p>
+  </section>
+</main>
+
+<div id="toast" role="status" hidden></div>
+
+<div id="intro" hidden>
+  <div class="card">
+    <h1>Before you go</h1>
+    <p>Abandoned places can be unsafe and are usually private property. Look from the outside, never enter a building that could collapse, and respect “no trespassing” signs.</p>
+    <p>Derelict needs your location to find spots near you and to check you in.</p>
+    <button id="btnIntro" class="primary" style="width:100%">Got it</button>
+  </div>
+</div>
+
+<script src="vendor/leaflet.js"></script>
+<script src="logic.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
